@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frame Scrubber</title>
+<style>
+  :root {
+    --bg: #14161a; --panel: #1c1f25; --panel2: #22262e; --border: #32363f;
+    --text: #e6e8ec; --dim: #9aa0ab; --accent: #4d9fff; --accent2: #2f7fe0; --gold: #e8b64c;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 "Segoe UI", system-ui, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+  header { display: flex; gap: 8px; align-items: center; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  header .title { font-weight: 600; font-size: 15px; margin-right: 6px; white-space: nowrap; }
+  input[type=text] { background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 7px 10px; font-size: 13px; }
+  #filePath { flex: 2 1 260px; min-width: 180px; }
+  #outDir { flex: 1 1 170px; min-width: 140px; }
+  #searchBox { flex: 1.5 1 220px; min-width: 160px; display: none; }
+  select { background: var(--panel2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 7px 8px; font-size: 13px; }
+  button { background: var(--accent2); border: none; color: #fff; border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  button:hover { background: var(--accent); }
+  button.ghost { background: var(--panel2); border: 1px solid var(--border); color: var(--text); }
+  button.ghost:hover { border-color: var(--accent); }
+  button.gold { background: #7a5f1f; border: 1px solid var(--gold); }
+  button.gold:hover { background: #94741f; }
+  button:disabled { opacity: .5; cursor: default; }
+
+  #modeToggle { display: none; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  #modeToggle button { border-radius: 0; background: var(--panel2); color: var(--dim); border: none; padding: 7px 12px; }
+  #modeToggle button.active { background: var(--accent2); color: #fff; }
+
+  #movieInfo { color: var(--dim); font-size: 12px; padding: 4px 14px; background: var(--panel); border-bottom: 1px solid var(--border); min-height: 22px; display: flex; gap: 14px; align-items: center; }
+  #filterInfo { color: var(--gold); }
+
+  #layout { flex: 1; display: flex; min-height: 0; }
+  #castRail { width: 216px; flex: none; background: #171a1f; border-right: 1px solid var(--border); overflow-y: auto; padding: 10px; display: none; }
+  #castRail h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); }
+  .person { display: flex; gap: 8px; align-items: center; padding: 5px 6px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; margin-bottom: 4px; }
+  .person:hover { background: var(--panel2); }
+  .person.checked { border-color: var(--accent); background: rgba(77,159,255,.12); }
+  .person img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: #000; flex: none; }
+  .person .pname { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .person .ptime { font-size: 11px; color: var(--dim); }
+  .person .check { margin-left: auto; color: var(--accent); visibility: hidden; }
+  .person.checked .check { visibility: visible; }
+  #castHint { font-size: 11px; color: var(--dim); margin-top: 8px; }
+
+  main { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+  #overview { flex: 1 1 55%; overflow-y: auto; padding: 12px; min-height: 0; }
+  #divider { height: 5px; background: var(--border); cursor: ns-resize; flex: none; }
+  #rangePanel { flex: 1 1 45%; overflow-y: auto; padding: 12px; background: #171a1f; min-height: 0; }
+  #rangeHeader { position: sticky; top: -12px; margin: -12px -12px 8px; padding: 8px 14px; background: #171a1f; border-bottom: 1px solid var(--border); color: var(--dim); font-size: 12px; z-index: 2; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+  .grid.frames { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .cell { background: var(--panel2); border: 2px solid transparent; border-radius: 8px; overflow: hidden; cursor: pointer; position: relative; }
+  .cell:hover { border-color: var(--dim); }
+  .cell.selected { border-color: var(--accent); }
+  .cell img { width: 100%; aspect-ratio: 16/9; object-fit: contain; display: block; background: #000; }
+  .cell .label { position: absolute; left: 0; right: 0; bottom: 0; padding: 2px 6px; font-size: 11px; color: #fff; background: rgba(0,0,0,.65); font-variant-numeric: tabular-nums; }
+  .cell .badges { position: absolute; top: 4px; left: 4px; right: 4px; display: flex; gap: 3px; flex-wrap: wrap; pointer-events: none; }
+  .badge { font-size: 9px; padding: 1px 5px; border-radius: 8px; background: rgba(0,0,0,.6); color: #cdd3dd; border: 1px solid rgba(255,255,255,.25); }
+  .cell .snippet { padding: 4px 6px; font-size: 11px; color: var(--gold); background: var(--panel2); border-top: 1px solid var(--border); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cell.hiddenCell { display: none; }
+
+  .sceneHeader { grid-column: 1 / -1; display: flex; gap: 10px; align-items: baseline; padding: 10px 4px 2px; cursor: pointer; user-select: none; }
+  .sceneHeader h4 { margin: 0; font-size: 13px; color: var(--text); }
+  .sceneHeader .scMeta { font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  .sceneHeader .caret { color: var(--dim); font-size: 11px; }
+  .sceneHeader.hiddenCell { display: none; }
+
+  .placeholder { color: var(--dim); padding: 30px; text-align: center; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--dim); border-top-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: none; align-items: center; justify-content: center; z-index: 10; }
+  .overlay.open { display: flex; }
+  #previewBox { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px; max-width: 92vw; max-height: 92vh; display: flex; flex-direction: column; gap: 10px; }
+  #previewImg { max-width: 88vw; max-height: 72vh; background: #000; border-radius: 6px; min-height: 200px; }
+  #previewBar { display: flex; gap: 8px; align-items: center; }
+  #previewTime { font-variant-numeric: tabular-nums; color: var(--dim); flex: 1; }
+
+  #browserBox { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; width: min(640px, 92vw); max-height: 80vh; display: flex; flex-direction: column; }
+  #browserPath { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--dim); font-size: 12px; word-break: break-all; }
+  #browserList { overflow-y: auto; padding: 6px; }
+  #browserList .entry { padding: 7px 12px; border-radius: 6px; cursor: pointer; display: flex; gap: 8px; }
+  #browserList .entry:hover { background: var(--panel2); }
+  #browserList .entry .ico { width: 18px; text-align: center; }
+  #browserFoot { padding: 10px 14px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+
+  #settingsBox { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; width: min(560px, 92vw); max-height: 88vh; overflow-y: auto; padding: 18px; }
+  #settingsBox h2 { margin: 0 0 4px; font-size: 16px; }
+  #settingsBox .sub { color: var(--dim); font-size: 12px; margin-bottom: 14px; }
+  #settingsBox label { display: block; font-size: 12px; color: var(--dim); margin: 10px 0 3px; }
+  #settingsBox input[type=text] { width: 100%; }
+  #settingsBox .row { display: flex; gap: 8px; margin-top: 16px; align-items: center; }
+  #cfgResult { font-size: 12px; margin-top: 12px; padding: 8px 10px; border-radius: 6px; display: none; white-space: pre-wrap; }
+  #cfgResult.ok { display: block; background: rgba(60,160,90,.15); border: 1px solid #3ca05a; }
+  #cfgResult.bad { display: block; background: rgba(224,82,82,.12); border: 1px solid #e05252; }
+
+  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--panel2); border: 1px solid var(--accent); border-radius: 8px; padding: 10px 18px; display: none; z-index: 20; max-width: 80vw; }
+  #toast.err { border-color: #e05252; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="title">🎞️ Frame Scrubber</span>
+  <input type="text" id="filePath" placeholder="Path to movie file (local or UNC)…" spellcheck="false">
+  <button class="ghost" id="browseBtn">Browse…</button>
+  <button id="loadBtn">Load</button>
+  <span id="modeToggle">
+    <button id="modeTime">Time</button><button id="modeShots">Shots</button>
+  </span>
+  <select id="interval" title="Overview thumbnail spacing">
+    <option value="5" selected>every 5 s</option>
+    <option value="10">every 10 s</option>
+    <option value="15">every 15 s</option>
+    <option value="30">every 30 s</option>
+    <option value="60">every 60 s</option>
+  </select>
+  <input type="text" id="searchBox" placeholder="🔎 Search dialog, objects, on-screen text…" spellcheck="false">
+  <button class="gold" id="indexBtn" style="display:none">✨ Index with Azure</button>
+  <input type="text" id="outDir" placeholder="Export folder (default: Pictures\frame-exports)" spellcheck="false">
+  <select id="format"><option value="png">PNG</option><option value="jpg">JPG (max quality)</option></select>
+  <button class="ghost" id="settingsBtn" title="Azure Video Indexer settings">⚙️</button>
+</header>
+<div id="movieInfo"><span id="infoText">No movie loaded. Pick a file and press Load.</span><span id="filterInfo"></span></div>
+
+<div id="layout">
+  <aside id="castRail">
+    <h3>Cast</h3>
+    <div id="castList"></div>
+    <div id="castHint">Check people to find shots where they appear <b>together</b>. Double-click a name to rename.</div>
+  </aside>
+  <main>
+    <div id="overview"><div class="placeholder">Overview thumbnails will appear here.</div></div>
+    <div id="divider"></div>
+    <div id="rangePanel">
+      <div id="rangeHeader">Click an overview thumbnail to see every frame in that range.</div>
+      <div id="rangeGrid" class="grid frames"></div>
+    </div>
+  </main>
+</div>
+
+<div class="overlay" id="previewOverlay">
+  <div id="previewBox">
+    <img id="previewImg" alt="frame preview">
+    <div id="previewBar">
+      <span id="previewTime"></span>
+      <button class="ghost" id="prevFrame" title="Previous frame (←)">◀ Frame</button>
+      <button class="ghost" id="nextFrame" title="Next frame (→)">Frame ▶</button>
+      <button id="exportBtn">💾 Export full-res (Enter)</button>
+      <button class="ghost" id="closePreview">Close (Esc)</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="browserOverlay">
+  <div id="browserBox">
+    <div id="browserPath"></div>
+    <div id="browserList"></div>
+    <div id="browserFoot"><button class="ghost" id="browserClose">Cancel</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="settingsOverlay">
+  <div id="settingsBox">
+    <h2>Azure Video Indexer</h2>
+    <div class="sub">Needs a paid (ARM-based) Video Indexer account — see README for creating one. Auth uses your <code>az login</code> identity, or paste an account access token below.</div>
+    <label>Subscription ID</label><input type="text" id="cfgSub" spellcheck="false">
+    <label>Resource group</label><input type="text" id="cfgRg" spellcheck="false">
+    <label>Account name (the VI resource name)</label><input type="text" id="cfgName" spellcheck="false">
+    <label>Account ID (GUID, from the VI resource Overview page)</label><input type="text" id="cfgId" spellcheck="false">
+    <label>Location (e.g. eastus)</label><input type="text" id="cfgLoc" spellcheck="false">
+    <label>Access token (optional fallback — expires hourly)</label><input type="text" id="cfgToken" spellcheck="false" placeholder="leave blank to use az login">
+    <label><input type="checkbox" id="cfgProxy" checked> Upload a 720p proxy instead of the original (recommended; required over 2 GB)</label>
+    <div id="cfgResult"></div>
+    <div class="row">
+      <button id="cfgSave">Save &amp; test connection</button>
+      <button class="ghost" id="cfgClose">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const state = {
+  file: null, info: null,
+  mode: 'time',
+  insights: null,
+  shotCells: [], sceneEls: [], shotSnippets: [],
+  checkedPeople: new Set(), collapsedScenes: new Set(), query: '',
+  rangeTimer: null, rangeJobId: null, rangeRendered: 0,
+  frames: [], previewIdx: -1, selectedOverview: null,
+  viPollTimer: null,
+};
+
+// ---- persistence ----
+try {
+  $('filePath').value = localStorage.getItem('fs.file') || '';
+  $('outDir').value = localStorage.getItem('fs.outDir') || '';
+  $('interval').value = localStorage.getItem('fs.interval') || '5';
+  $('format').value = localStorage.getItem('fs.format') || 'png';
+} catch {}
+$('outDir').addEventListener('change', () => localStorage.setItem('fs.outDir', $('outDir').value));
+$('format').addEventListener('change', () => localStorage.setItem('fs.format', $('format').value));
+$('interval').addEventListener('change', () => { localStorage.setItem('fs.interval', $('interval').value); if (state.info && state.mode === 'time') buildTimeView(); });
+
+function toast(msg, isErr) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.className = isErr ? 'err' : '';
+  t.style.display = 'block';
+  clearTimeout(t._h);
+  t._h = setTimeout(() => t.style.display = 'none', isErr ? 7000 : 3500);
+}
+
+function fmtTime(s, withMs) {
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  const p = n => String(Math.floor(n)).padStart(2, '0');
+  let out = `${p(h)}:${p(m)}:${p(sec)}`;
+  if (withMs) out += '.' + String(Math.round((s - Math.floor(s)) * 1000)).padStart(3, '0');
+  return out;
+}
+
+const encFile = () => encodeURIComponent(state.file);
+
+// ---- load movie ----
+$('loadBtn').addEventListener('click', loadMovie);
+$('filePath').addEventListener('keydown', e => { if (e.key === 'Enter') loadMovie(); });
+
+async function loadMovie() {
+  const file = $('filePath').value.trim();
+  if (!file) return toast('Enter a movie file path first.', true);
+  $('infoText').innerHTML = '<span class="spinner"></span>Probing movie…';
+  try {
+    const r = await fetch('/api/probe?file=' + encodeURIComponent(file));
+    const info = await r.json();
+    if (!r.ok) throw new Error(info.error || r.statusText);
+    state.file = file;
+    state.info = info;
+    state.insights = null;
+    state.checkedPeople.clear();
+    state.collapsedScenes.clear();
+    state.query = '';
+    $('searchBox').value = '';
+    localStorage.setItem('fs.file', file);
+    $('infoText').textContent =
+      `${info.name} — ${fmtTime(info.duration)} · ${info.width}×${info.height} · ${info.fps.toFixed(3)} fps · ${info.codec}`;
+    stopRange();
+    clearInterval(state.viPollTimer);
+    $('rangeGrid').innerHTML = '';
+    $('rangeHeader').textContent = 'Click an overview thumbnail to see every frame in that range.';
+    await loadInsights();           // decides mode + header controls
+    if (state.insights) setMode('shots'); else { setMode('time'); checkViStatus(); }
+  } catch (e) {
+    $('infoText').textContent = 'Failed to load movie.';
+    toast(e.message, true);
+  }
+}
+
+// ---- mode handling ----
+function setMode(mode) {
+  state.mode = state.insights ? mode : 'time';
+  const shots = state.mode === 'shots';
+  $('modeToggle').style.display = state.insights ? 'inline-flex' : 'none';
+  $('modeTime').classList.toggle('active', !shots);
+  $('modeShots').classList.toggle('active', shots);
+  $('interval').style.display = shots ? 'none' : '';
+  $('searchBox').style.display = shots ? 'block' : 'none';
+  $('castRail').style.display = shots && state.insights.people.length ? 'block' : 'none';
+  if (shots) buildShotView(); else buildTimeView();
+}
+$('modeTime').addEventListener('click', () => setMode('time'));
+$('modeShots').addEventListener('click', () => setMode('shots'));
+
+// ---- time-interval view (fallback / un-indexed) ----
+function buildTimeView() {
+  const { duration } = state.info;
+  const interval = parseInt($('interval').value, 10);
+  const ov = $('overview');
+  ov.innerHTML = '';
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  ov.appendChild(grid);
+  state.selectedOverview = null;
+  $('filterInfo').textContent = '';
+
+  for (let t = 0; t < duration; t += interval) {
+    const winDur = Math.min(interval, duration - t);
+    const cell = makeThumbCell(t, fmtTime(t), 240);
+    cell.addEventListener('click', () => selectCell(cell, t, winDur));
+    grid.appendChild(cell);
+  }
+}
+
+function makeThumbCell(t, labelText, w) {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  const img = document.createElement('img');
+  img.loading = 'lazy';
+  img.src = `/api/thumb?file=${encFile()}&t=${t.toFixed(3)}&w=${w}`;
+  const label = document.createElement('div');
+  label.className = 'label';
+  label.textContent = labelText;
+  cell.append(img, label);
+  return cell;
+}
+
+function selectCell(cell, start, dur) {
+  if (state.selectedOverview) state.selectedOverview.classList.remove('selected');
+  state.selectedOverview = cell;
+  cell.classList.add('selected');
+  openRange(start, dur);
+}
+
+// ---- shot/scene view ----
+const SHOT_BADGES = new Set(['Wide', 'Medium', 'CloseUp', 'ExtremeCloseUp', 'TwoShots', 'MultipleFaces', 'Indoor', 'Outdoor']);
+const BADGE_LABELS = { CloseUp: 'Close-up', ExtremeCloseUp: 'XCU', TwoShots: 'Two-shot', MultipleFaces: 'Group' };
+
+function buildShotView() {
+  const ins = state.insights;
+  const ov = $('overview');
+  ov.innerHTML = '';
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  ov.appendChild(grid);
+  state.selectedOverview = null;
+  state.shotCells = [];
+  state.sceneEls = [];
+
+  const renderShot = i => {
+    const sh = ins.shots[i];
+    const cell = makeThumbCell(sh.kf[0], `${fmtTime(sh.start)} – ${fmtTime(sh.end)}`, 240);
+    const badges = document.createElement('div');
+    badges.className = 'badges';
+    for (const t of sh.type) {
+      if (!SHOT_BADGES.has(t)) continue;
+      const b = document.createElement('span');
+      b.className = 'badge';
+      b.textContent = BADGE_LABELS[t] || t;
+      badges.appendChild(b);
+    }
+    if (badges.children.length) cell.appendChild(badges);
+    const snip = document.createElement('div');
+    snip.className = 'snippet';
+    snip.style.display = 'none';
+    cell.appendChild(snip);
+    state.shotSnippets[i] = snip;
+    cell.addEventListener('click', () =>
+      selectCell(cell, sh.start, Math.min(Math.max(sh.end - sh.start, 0.5), 120)));
+    state.shotCells[i] = cell;
+    return cell;
+  };
+
+  if (ins.scenes.length) {
+    ins.scenes.forEach((sc, si) => {
+      const head = document.createElement('div');
+      head.className = 'sceneHeader';
+      head.innerHTML = `<span class="caret">▼</span><h4>Scene ${si + 1}</h4><span class="scMeta"></span>`;
+      head.addEventListener('click', () => {
+        if (state.collapsedScenes.has(si)) state.collapsedScenes.delete(si);
+        else state.collapsedScenes.add(si);
+        applyFilters();
+      });
+      grid.appendChild(head);
+      state.sceneEls[si] = head;
+      for (const i of sc.shotIdx) grid.appendChild(renderShot(i));
+    });
+    // shots that fell outside every scene
+    const inScene = new Set(ins.scenes.flatMap(s => s.shotIdx));
+    ins.shots.forEach((_, i) => { if (!inScene.has(i)) grid.appendChild(renderShot(i)); });
+  } else {
+    ins.shots.forEach((_, i) => grid.appendChild(renderShot(i)));
+  }
+
+  buildCastRail();
+  applyFilters();
+}
+
+function buildCastRail() {
+  const list = $('castList');
+  list.innerHTML = '';
+  for (const p of state.insights.people) {
+    const el = document.createElement('div');
+    el.className = 'person';
+    const mins = Math.round(p.seenDuration / 60);
+    el.innerHTML = `<img loading="lazy" src="/api/vi/face-thumb?file=${encFile()}&id=${p.thumbId}">
+      <div><div class="pname"></div><div class="ptime">${mins >= 1 ? mins + ' min' : Math.round(p.seenDuration) + ' s'} on screen · ${p.shotIdx.length} shots</div></div>
+      <span class="check">✔</span>`;
+    el.querySelector('.pname').textContent = p.name;
+    el.addEventListener('click', () => {
+      if (state.checkedPeople.has(p.id)) state.checkedPeople.delete(p.id);
+      else state.checkedPeople.add(p.id);
+      el.classList.toggle('checked');
+      applyFilters();
+    });
+    el.addEventListener('dblclick', async e => {
+      e.preventDefault();
+      const name = prompt('Name this person:', p.name);
+      if (!name || name === p.name) return;
+      const r = await fetch('/api/vi/person-name', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ file: state.file, id: p.id, name })
+      });
+      if (r.ok) { p.name = name; el.querySelector('.pname').textContent = name; }
+    });
+    if (state.checkedPeople.has(p.id)) el.classList.add('checked');
+    list.appendChild(el);
+  }
+}
+
+// ---- filtering: people co-occurrence ∩ search matches ----
+let searchDebounce = null;
+$('searchBox').addEventListener('input', () => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => {
+    state.query = $('searchBox').value.trim().toLowerCase();
+    applyFilters();
+  }, 150);
+});
+
+function applyFilters() {
+  const ins = state.insights;
+  if (!ins || state.mode !== 'shots') return;
+  const n = ins.shots.length;
+  let visible = null; // null = all
+
+  for (const pid of state.checkedPeople) {
+    const p = ins.people.find(x => x.id === pid);
+    const set = new Set(p ? p.shotIdx : []);
+    visible = visible === null ? set : new Set([...visible].filter(i => set.has(i)));
+  }
+
+  const snippets = new Map(); // shotIdx -> text
+  if (state.query.length >= 2) {
+    const q = state.query;
+    const matched = new Set();
+    for (const t of ins.transcript) {
+      if (t.text.toLowerCase().includes(q)) {
+        for (const i of t.shotIdx) { matched.add(i); if (!snippets.has(i)) snippets.set(i, '💬 ' + t.text); }
+      }
+    }
+    for (const tag of ins.tags) {
+      if (tag.text.toLowerCase().includes(q)) {
+        const icon = tag.kind === 'ocr' ? '🔤' : tag.kind === 'entity' ? '👤' : '🏷️';
+        for (const i of tag.shotIdx) { matched.add(i); if (!snippets.has(i)) snippets.set(i, `${icon} ${tag.text}`); }
+      }
+    }
+    for (const p of ins.people) {
+      if (p.name.toLowerCase().includes(q)) for (const i of p.shotIdx) matched.add(i);
+    }
+    visible = visible === null ? matched : new Set([...visible].filter(i => matched.has(i)));
+  }
+
+  let shown = 0;
+  const sceneCounts = ins.scenes.map(() => 0);
+  ins.shots.forEach((_, i) => {
+    const cell = state.shotCells[i];
+    if (!cell) return;
+    const vis = visible === null || visible.has(i);
+    const si = ins.scenes.findIndex(sc => sc.shotIdx.includes(i));
+    const collapsed = si >= 0 && state.collapsedScenes.has(si);
+    cell.classList.toggle('hiddenCell', !vis || collapsed);
+    if (vis) { shown++; if (si >= 0) sceneCounts[si]++; }
+    const snip = state.shotSnippets[i];
+    if (snip) {
+      const text = snippets.get(i);
+      snip.style.display = text ? 'block' : 'none';
+      if (text) snip.textContent = text;
+    }
+  });
+
+  state.sceneEls.forEach((head, si) => {
+    const sc = state.insights.scenes[si];
+    const cnt = sceneCounts[si];
+    head.classList.toggle('hiddenCell', cnt === 0);
+    head.querySelector('.caret').textContent = state.collapsedScenes.has(si) ? '▶' : '▼';
+    head.querySelector('.scMeta').textContent =
+      `${fmtTime(sc.start)} – ${fmtTime(sc.end)} · ${cnt}${cnt !== sc.shotIdx.length ? ' of ' + sc.shotIdx.length : ''} shots`;
+  });
+
+  const filters = [];
+  if (state.checkedPeople.size) {
+    const names = [...state.checkedPeople].map(id => (ins.people.find(p => p.id === id) || {}).name).filter(Boolean);
+    filters.push(names.join(' + ') + ' together');
+  }
+  if (state.query.length >= 2) filters.push(`"${state.query}"`);
+  $('filterInfo').textContent = filters.length
+    ? `Filtered: ${filters.join(' · ')} → ${shown} of ${n} shots (earliest match is first)`
+    : '';
+}
+
+// ---- Azure indexing flow ----
+async function loadInsights() {
+  try {
+    const r = await fetch(`/api/vi/insights?file=${encFile()}`);
+    if (!r.ok) return false;
+    state.insights = await r.json();
+    $('indexBtn').style.display = 'none';
+    return true;
+  } catch { return false; }
+}
+
+async function checkViStatus() {
+  const r = await fetch(`/api/vi/status?file=${encFile()}`);
+  const s = await r.json();
+  const btn = $('indexBtn');
+  btn.style.display = '';
+  if (['starting', 'proxy', 'uploading', 'indexing', 'faces', 'normalizing'].includes(s.stage)) {
+    watchIndexing();
+  } else if (s.stage === 'interrupted') {
+    btn.textContent = '✨ Resume Azure indexing';
+    btn.disabled = false;
+  } else if (s.stage === 'failed') {
+    btn.textContent = '⚠️ Indexing failed — retry';
+    btn.disabled = false;
+    if (s.error) toast('Last indexing error: ' + s.error, true);
+  } else {
+    btn.textContent = '✨ Index with Azure';
+    btn.disabled = false;
+  }
+}
+
+$('indexBtn').addEventListener('click', async () => {
+  const cfg = await (await fetch('/api/vi/config')).json();
+  if (!cfg.configured) { openSettings(); return; }
+  const status = await (await fetch(`/api/vi/status?file=${encFile()}`)).json();
+  if (status.stage === 'idle' || status.stage === 'failed') {
+    const mins = state.info.duration / 60;
+    const cost = (mins * 0.114).toFixed(2);
+    if (!confirm(`Index "${state.info.name}" with Azure Video Indexer?\n\n` +
+      `Duration: ${fmtTime(state.info.duration)}\nEstimated one-time cost: ~$${cost} (Standard preset)\n` +
+      `A 720p proxy is encoded and uploaded; indexing typically takes tens of minutes.`)) return;
+  }
+  const r = await fetch('/api/vi/index', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ file: state.file })
+  });
+  const j = await r.json();
+  if (!r.ok) return toast(j.error || 'Failed to start indexing', true);
+  watchIndexing();
+});
+
+function watchIndexing() {
+  const btn = $('indexBtn');
+  btn.disabled = true;
+  clearInterval(state.viPollTimer);
+  const tick = async () => {
+    try {
+      const s = await (await fetch(`/api/vi/status?file=${encFile()}`)).json();
+      const stageText = {
+        starting: 'Starting…', proxy: `Encoding proxy ${s.progress || 0}%`,
+        uploading: 'Uploading…', indexing: `Azure indexing ${s.viProgress || '…'}`,
+        faces: 'Fetching faces…', normalizing: 'Finishing…'
+      }[s.stage];
+      if (stageText) { btn.textContent = '⏳ ' + stageText; return; }
+      clearInterval(state.viPollTimer);
+      if (s.stage === 'ready') {
+        toast('Semantic index ready! Switching to shot view.');
+        if (await loadInsights()) setMode('shots');
+      } else {
+        btn.disabled = false;
+        btn.textContent = '⚠️ Indexing failed — retry';
+        if (s.error) toast('Indexing failed: ' + s.error, true);
+      }
+    } catch { /* transient */ }
+  };
+  tick();
+  state.viPollTimer = setInterval(tick, 5000);
+}
+
+// ---- settings ----
+function openSettings() {
+  fetch('/api/vi/config').then(r => r.json()).then(cfg => {
+    $('cfgSub').value = cfg.subscriptionId || '';
+    $('cfgRg').value = cfg.resourceGroup || '';
+    $('cfgName').value = cfg.accountName || '';
+    $('cfgId').value = cfg.accountId || '';
+    $('cfgLoc').value = cfg.location || '';
+    $('cfgToken').value = cfg.pastedAccessToken || '';
+    $('cfgProxy').checked = cfg.proxyUpload !== false;
+    $('cfgResult').className = '';
+    $('settingsOverlay').classList.add('open');
+  });
+}
+$('settingsBtn').addEventListener('click', openSettings);
+$('cfgClose').addEventListener('click', () => $('settingsOverlay').classList.remove('open'));
+$('cfgSave').addEventListener('click', async () => {
+  const btn = $('cfgSave');
+  btn.disabled = true;
+  btn.textContent = 'Testing…';
+  try {
+    const r = await fetch('/api/vi/config', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        subscriptionId: $('cfgSub').value.trim(), resourceGroup: $('cfgRg').value.trim(),
+        accountName: $('cfgName').value.trim(), accountId: $('cfgId').value.trim(),
+        location: $('cfgLoc').value.trim(), pastedAccessToken: $('cfgToken').value.trim(),
+        proxyUpload: $('cfgProxy').checked
+      })
+    });
+    const j = await r.json();
+    const el = $('cfgResult');
+    el.className = j.ok ? 'ok' : 'bad';
+    el.textContent = j.ok ? '✔ Connected to Video Indexer.' : `✖ [${j.stage}] ${j.error}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Save & test connection';
+  }
+});
+
+// ---- range panel (unchanged core) ----
+function stopRange() {
+  clearInterval(state.rangeTimer);
+  state.rangeTimer = null;
+  state.rangeJobId = null;
+}
+
+async function openRange(start, dur) {
+  stopRange();
+  state.frames = [];
+  state.rangeRendered = 0;
+  $('rangeGrid').innerHTML = '';
+  $('rangeHeader').innerHTML =
+    `<span class="spinner"></span>Extracting every frame ${fmtTime(start)} – ${fmtTime(start + dur)}…`;
+  try {
+    const r = await fetch('/api/range', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: state.file, start, dur })
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    state.rangeJobId = j.jobId;
+    state.rangeStart = start;
+    state.rangeDur = dur;
+    pollRange();
+    state.rangeTimer = setInterval(pollRange, 500);
+  } catch (e) {
+    $('rangeHeader').textContent = 'Frame extraction failed.';
+    toast(e.message, true);
+  }
+}
+
+async function pollRange() {
+  if (!state.rangeJobId) return;
+  try {
+    const r = await fetch('/api/range/status?jobId=' + encodeURIComponent(state.rangeJobId));
+    const s = await r.json();
+    if (!r.ok) throw new Error(s.error || r.statusText);
+    if (s.error) throw new Error(s.error);
+
+    const grid = $('rangeGrid');
+    for (let i = state.rangeRendered; i < s.count; i++) {
+      const time = s.times[i];
+      const url = `${s.base}/f_${String(i + 1).padStart(5, '0')}.jpg`;
+      state.frames.push({ time, url });
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      const img = document.createElement('img');
+      img.loading = 'lazy';
+      img.src = url;
+      const label = document.createElement('div');
+      label.className = 'label';
+      label.textContent = `#${i + 1} · ${fmtTime(time, true)}`;
+      cell.append(img, label);
+      const idx = i;
+      cell.addEventListener('click', () => openPreview(idx));
+      grid.appendChild(cell);
+    }
+    state.rangeRendered = Math.max(state.rangeRendered, s.count);
+
+    if (s.done) {
+      stopRange();
+      $('rangeHeader').textContent =
+        `${fmtTime(state.rangeStart)} – ${fmtTime(state.rangeStart + state.rangeDur)} · ${state.frames.length} frames. Click one to preview & export.`;
+    }
+  } catch (e) {
+    stopRange();
+    $('rangeHeader').textContent = 'Frame extraction failed.';
+    toast(e.message, true);
+  }
+}
+
+// ---- preview & export ----
+function openPreview(idx) {
+  if (idx < 0 || idx >= state.frames.length) return;
+  state.previewIdx = idx;
+  const f = state.frames[idx];
+  $('previewImg').src = `/api/thumb?file=${encFile()}&t=${f.time.toFixed(4)}&w=1280`;
+  $('previewTime').textContent = `Frame #${idx + 1} · ${fmtTime(f.time, true)}`;
+  $('previewOverlay').classList.add('open');
+  $('prevFrame').disabled = idx === 0;
+  $('nextFrame').disabled = idx === state.frames.length - 1;
+}
+$('prevFrame').addEventListener('click', () => openPreview(state.previewIdx - 1));
+$('nextFrame').addEventListener('click', () => openPreview(state.previewIdx + 1));
+$('closePreview').addEventListener('click', () => $('previewOverlay').classList.remove('open'));
+$('previewOverlay').addEventListener('click', e => { if (e.target === $('previewOverlay')) $('previewOverlay').classList.remove('open'); });
+
+document.addEventListener('keydown', e => {
+  if (!$('previewOverlay').classList.contains('open')) return;
+  if (e.key === 'ArrowLeft') openPreview(state.previewIdx - 1);
+  else if (e.key === 'ArrowRight') openPreview(state.previewIdx + 1);
+  else if (e.key === 'Enter') exportFrame();
+  else if (e.key === 'Escape') $('previewOverlay').classList.remove('open');
+});
+
+$('exportBtn').addEventListener('click', exportFrame);
+async function exportFrame() {
+  const f = state.frames[state.previewIdx];
+  if (!f) return;
+  const btn = $('exportBtn');
+  btn.disabled = true;
+  btn.textContent = 'Exporting…';
+  try {
+    const r = await fetch('/api/export', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file: state.file, time: f.time, outDir: $('outDir').value, format: $('format').value })
+    });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    toast('Saved: ' + j.saved);
+  } catch (e) {
+    toast('Export failed: ' + e.message, true);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '💾 Export full-res (Enter)';
+  }
+}
+
+// ---- file browser ----
+$('browseBtn').addEventListener('click', () => { openBrowser(guessStartDir()); });
+$('browserClose').addEventListener('click', () => $('browserOverlay').classList.remove('open'));
+$('browserOverlay').addEventListener('click', e => { if (e.target === $('browserOverlay')) $('browserOverlay').classList.remove('open'); });
+
+function guessStartDir() {
+  const cur = $('filePath').value.trim();
+  if (cur.includes('\\')) return cur.slice(0, cur.lastIndexOf('\\'));
+  return '';
+}
+
+async function openBrowser(dir) {
+  try {
+    const r = await fetch('/api/browse?dir=' + encodeURIComponent(dir));
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || r.statusText);
+    $('browserPath').textContent = j.dir || 'Drives';
+    const list = $('browserList');
+    list.innerHTML = '';
+    const add = (ico, name, fn) => {
+      const e = document.createElement('div');
+      e.className = 'entry';
+      e.innerHTML = `<span class="ico">${ico}</span><span></span>`;
+      e.lastElementChild.textContent = name;
+      e.addEventListener('click', fn);
+      list.appendChild(e);
+    };
+    if (j.parent !== null && j.dir) add('⬆️', '..', () => openBrowser(j.parent));
+    for (const d of j.dirs) add('📁', d, () => openBrowser(j.dir ? joinPath(j.dir, d) : d));
+    for (const f of j.files) add('🎬', f, () => {
+      $('filePath').value = joinPath(j.dir, f);
+      $('browserOverlay').classList.remove('open');
+      loadMovie();
+    });
+    $('browserOverlay').classList.add('open');
+  } catch (e) {
+    toast(e.message, true);
+    if (dir) openBrowser('');
+  }
+}
+function joinPath(dir, name) {
+  return dir.endsWith('\\') ? dir + name : dir + '\\' + name;
+}
+
+// ---- resizable divider ----
+(() => {
+  const div = $('divider'), ov = $('overview'), rp = $('rangePanel');
+  let dragging = false;
+  div.addEventListener('mousedown', () => { dragging = true; document.body.style.userSelect = 'none'; });
+  window.addEventListener('mouseup', () => { dragging = false; document.body.style.userSelect = ''; });
+  window.addEventListener('mousemove', e => {
+    if (!dragging) return;
+    const main = document.querySelector('main').getBoundingClientRect();
+    const frac = Math.min(.85, Math.max(.15, (e.clientY - main.top) / main.height));
+    ov.style.flex = `1 1 ${frac * 100}%`;
+    rp.style.flex = `1 1 ${(1 - frac) * 100}%`;
+  });
+})();
+
+// auto-load last movie
+if ($('filePath').value) loadMovie();
+</script>
+</body>
+</html>
